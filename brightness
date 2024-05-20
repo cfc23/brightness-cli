@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# Usage function
+usage() {
+	echo "Usage: $0 [up|down|reset|bindkeys|<float>]"
+	echo "   up       : Increase brightness by 0.1"
+	echo "   down     : Decrease brightness by 0.1"
+	echo "   reset    : Reset brightness to default"
+	echo "   bindkeys : Set up default key bindings"
+	echo "   <float>  : Set brightness to the specified value (e.g., 0.5)"
+	exit 1
+}
+
+# Default brightness value
+DEFAULT_BRIGHTNESS=1.0
+
+# Function to set up key bindings
+setup_keybindings() {
+	# Get the script command
+	SCRIPT_DIR=$(dirname "$0")
+	if [[ ":$PATH:" == *":$SCRIPT_DIR:"* ]]; then
+		COMMAND=$(basename "$0")
+		echo "Script found in PATH. Using $COMMAND command for key bindings."
+	else
+		COMMAND="$(realpath "$0")"
+		echo "Script NOT found in PATH. Using full file path for key bindings. If you move the script, you will need to uodate your key bindings."
+	fi
+
+	# Get any existing custom key bindings
+	existing_bindings=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
+
+	# Check if there are existing bindings
+	if [ "$existing_bindings" == "@as []" ]; then
+		new_bindings="[ '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/' ]"
+	elif [ -n "$existing_bindings" ]; then
+		existing_bindings=${existing_bindings:1:-1}
+		new_bindings="[$existing_bindings, '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/' ]"
+	else
+		echo "Unexpected value returned. Binding keys aborted. Please bind keys manually."
+		# new_bindings="[ '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/', '/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/' ]"
+	fi
+
+	# Set the new list of key bindings
+	gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_bindings"
+
+	# Increase brightness binding
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/ name 'Brightness Up'
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/ command "$COMMAND up"
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_up/ binding '<Alt>Page_Up'
+
+	# Decrease brightness binding
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/ name 'Brightness Down'
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/ command "$COMMAND down"
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_down/ binding '<Alt>Page_Down'
+
+	# Reset brightness binding
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/ name 'Brightness Reset'
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/ command "$COMMAND reset"
+	gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom_brightness_reset/ binding '<Alt>Home'
+
+	echo "Key bindings set: Alt+PageUp (up), Alt+PageDown (down), Alt+Home (reset)"
+	exit 0
+}
+
+# Get the current brightness
+current_brightness=$(xrandr --verbose | grep -i brightness | cut -f2 -d ' ')
+current_brightness=$(echo $current_brightness | xargs printf "%.1f")
+
+# Calculate the new brightness
+if [ "$1" == "up" ]; then
+	new_brightness=$(echo "$current_brightness + 0.1" | bc)
+elif [ "$1" == "down" ]; then
+	new_brightness=$(echo "$current_brightness - 0.1" | bc)
+elif [ "$1" == "reset" ]; then
+	new_brightness=$DEFAULT_BRIGHTNESS
+elif [ "$1" == "bindkeys" ]; then
+	setup_keybindings
+else
+	# Check if argument is a valid float
+	if [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+		new_brightness=$1
+	else
+		usage
+	fi
+fi
+
+# Apply the new brightness to all connected screens
+for output in $(xrandr --current | grep ' connected' | cut -d ' ' -f1); do
+	xrandr --output $output --brightness $new_brightness
+done
+
+echo "Brightness set to $new_brightness"
